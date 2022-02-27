@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import print_function
-from ntpath import join
-from six.moves import input
 
 import sys
+import math
 import copy
-from typing import List
+from typing import List, Union
 import numpy as np
 
 import rospy
 import actionlib
 import moveit_commander
-import moveit_msgs.msg
-import geometry_msgs.msg
+import std_msgs.msg
+import moveit_msgs.msg as mi_msg
 
-from math import dist, fabs, cos
+from geometry_msgs.msg import Pose, PoseStamped, Twist
 
 from cartesian_control_msgs.msg import (
     FollowCartesianTrajectoryAction,
@@ -22,7 +21,9 @@ from cartesian_control_msgs.msg import (
     CartesianTrajectoryPoint,
 )
 
+from moveit.core.kinematic_constraints import constructGoalConstraints
 from moveit_commander.conversions import pose_to_list
+from moveit_msgs.srv import GetMotionPlan
 
 from controller_manager_msgs.srv import (
     LoadControllerRequest,
@@ -33,6 +34,7 @@ from controller_manager_msgs.srv import (
     SwitchControllerRequest,
 )
 
+
 MOVEIT_CONTROLLER = "scaled_pos_joint_traj_controller"
 POSE_CONTROLLER = "pose_based_cartesian_traj_controller"
 TWIST_CONTROLLER = "twist_controller"
@@ -40,43 +42,58 @@ TWIST_CONTROLLER = "twist_controller"
 avail_controllers = [MOVEIT_CONTROLLER, POSE_CONTROLLER, TWIST_CONTROLLER]
 
 
-def all_close(goal, actual, tolerance):
+def joints_close(goal: List, actual: List, tolerance: float):
     """
-    Convenience method for testing if the values in two lists are within a tolerance of each other.
-    For Pose and PoseStamped inputs, the angle between the two quaternions is compared (the angle
-    between the identical orientations q and -q is calculated correctly).
-    @param: goal       A list of floats, a Pose or a PoseStamped
-    @param: actual     A list of floats, a Pose or a PoseStamped
-    @param: tolerance  A float
-    @returns: bool
+    Check if the joint values in two lists are within a tolerance of each other
     """
-    if type(goal) is list:
-        for index in range(len(goal)):
-            if abs(actual[index] - goal[index]) > tolerance:
-                return False
-
-    elif type(goal) is geometry_msgs.msg.PoseStamped:
-        return all_close(goal.pose, actual.pose, tolerance)
-
-    elif type(goal) is geometry_msgs.msg.Pose:
-        x0, y0, z0, qx0, qy0, qz0, qw0 = pose_to_list(actual)
-        x1, y1, z1, qx1, qy1, qz1, qw1 = pose_to_list(goal)
-        # Euclidean distance
-        d = dist((x1, y1, z1), (x0, y0, z0))
-        # phi = angle between orientations
-        cos_phi_half = fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
-        return d <= tolerance and cos_phi_half >= cos(tolerance / 2.0)
-
+    for index in range(len(goal)):
+        if abs(actual[index] - goal[index]) > tolerance:
+            return False
     return True
 
 
+def poses_close(
+    goal: Union[Pose, PoseStamped],
+    actual: Union[Pose, PoseStamped],
+    pos_tolerance: float,
+    orient_tolerance: float,
+):
+    """
+    Check if the actual and goal poses are within a tolerance of each other.
+    For Pose and PoseStamped inputs, the angle between the two quaternions is compared (the angle
+    between the identical orientations q and -q is calculated correctly).
+    """
+
+    goal = goal.pose if isinstance(goal, PoseStamped) else goal
+    actual = actual.pose if isinstance(actual, PoseStamped) else actual
+
+    x0, y0, z0, qx0, qy0, qz0, qw0 = pose_to_list(actual)
+    x1, y1, z1, qx1, qy1, qz1, qw1 = pose_to_list(goal)
+    # Euclidean distance
+    d = math.dist((x1, y1, z1), (x0, y0, z0))
+    # phi = angle between orientations
+    cos_phi_half = math.fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
+    return d <= pos_tolerance and cos_phi_half >= math.cos(orient_tolerance / 2.0)
+
+
 class UR5eMoveGroup(object):
+
+    JOINTS = [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+    ]
+
     def __init__(self, verbose: bool = False) -> None:
 
         rospy.init_node("ur5e_move_group_interface")
         self._verbose = verbose
         # initialize `moveit_commander` and a `rospy` node
         moveit_commander.roscpp_initialize(sys.argv)
+        # set a default timeout threshold non-motion requests
         self.timeout = rospy.Duration(5)
 
         # setup controller-manager ROS services
@@ -89,13 +106,12 @@ class UR5eMoveGroup(object):
         self.list_srv = rospy.ServiceProxy(
             "controller_manager/list_controllers", ListControllers
         )
-        try:
-            self.switch_srv.wait_for_service(self.timeout.to_sec())
-        except rospy.exceptions.ROSException as err:
-            rospy.logerr(
-                "Could not reach controller switch service. Msg: {}".format(err)
-            )
-            sys.exit(-1)
+        # setup moveit publishers, services, and actions
+        self.get_plan = rospy.ServiceProxy("/plan_kinematic_path", GetMotionPlan)
+        self.execute_plan = actionlib.SimpleActionClient(
+            "/execute_trajectory", mi_msg.ExecuteTrajectoryAction
+        )
+
         self._load_controllers()
         self._active_controller = None
 
@@ -109,30 +125,25 @@ class UR5eMoveGroup(object):
 
         ## Instantiate a `MoveGroupCommander`_ object.  This object is an interface to a
         ## planning group (group of joints). This interface is used to plan and execute motions
-        group_name = "manipulator"
-        self.move_group = moveit_commander.MoveGroupCommander(group_name)
+        self.group_name = "manipulator"
+        self.move_group = moveit_commander.MoveGroupCommander(self.group_name)
 
         ## Create a `DisplayTrajectory`_ ROS publisher which is used to display
         ## trajectories in Rviz:
-        display_trajectory_publisher = rospy.Publisher(
-            "/move_group/display_planned_path",
-            moveit_msgs.msg.DisplayTrajectory,
-            queue_size=20,
+        self.display_trajectory_publisher = rospy.Publisher(
+            "/move_group/display_planned_path", mi_msg.DisplayTrajectory, queue_size=20
         )
 
-        # Misc variables
-        self.box_name = ""
-        self.display_trajectory_publisher = display_trajectory_publisher
         # Get the name of the reference frame for this robot
         self.planning_frame = self.move_group.get_planning_frame()
         # Get the name of the end-effector link for this group:
-        self.eef_link = self.move_group.get_end_effector_link()
+        self.eef_frame = self.move_group.get_end_effector_link()
         # Get a list of all the groups in the robot:
         self.group_names = self.robot.get_group_names()
 
         if self._verbose:
             print("============ Planning frame: %s" % self.planning_frame)
-            print("============ End effector link: %s" % self.eef_link)
+            print("============ End effector link: %s" % self.eef_frame)
             print(
                 "============ Available Planning Groups:", self.robot.get_group_names()
             )
@@ -145,6 +156,12 @@ class UR5eMoveGroup(object):
         resp = self.list_srv(srv)
         loaded_controllers = [controller.name for controller in resp.controller]
 
+        try:
+            self.load_srv.wait_for_service(self.timeout.to_sec())
+        except rospy.exceptions.ROSException as err:
+            rospy.logerr("Could not reach Load Controller service. Msg: {}".format(err))
+            sys.exit(-1)
+
         for controller in avail_controllers:
             if controller not in loaded_controllers:
                 srv = LoadControllerRequest()
@@ -154,12 +171,15 @@ class UR5eMoveGroup(object):
     def switch_controller(self, target_controller: str):
         """
         Activates the desired controller configuration
-        
+
         Note: This class keeps track of the any controller start/stop made through
         the class methods. Changes made outside the class will not be reflected.
         """
         if self._active_controller == target_controller:
             return
+
+        self.move_group.stop()
+        rospy.sleep(1)
 
         srv = ListControllersRequest()
         resp = self.list_srv(srv)
@@ -176,6 +196,14 @@ class UR5eMoveGroup(object):
             stop_controllers.remove(target_controller)
 
         if len(start_controller) != 0 or len(stop_controllers) != 0:
+            try:
+                self.switch_srv.wait_for_service(self.timeout.to_sec())
+            except rospy.exceptions.ROSException as err:
+                rospy.logerr(
+                    "Could not reach Switch Controller service. Msg: {}".format(err)
+                )
+                sys.exit(-1)
+
             srv = SwitchControllerRequest()
             srv.stop_controllers = stop_controllers
             srv.start_controllers = start_controller
@@ -189,7 +217,7 @@ class UR5eMoveGroup(object):
 
         if target_controller == POSE_CONTROLLER:
             self.trajectory_client = actionlib.SimpleActionClient(
-                 "{}/follow_cartesian_trajectory".format(target_controller),
+                "{}/follow_cartesian_trajectory".format(target_controller),
                 FollowCartesianTrajectoryAction,
             )
             # wait for the connection with the server to be established before sending goals
@@ -198,7 +226,7 @@ class UR5eMoveGroup(object):
 
         elif target_controller == TWIST_CONTROLLER:
             self.twist_pub = rospy.Publisher(
-                "/twist_controller/command", geometry_msgs.msg.Twist, queue_size=1
+                "/twist_controller/command", Twist, queue_size=1
             )
             rospy.sleep(1)
 
@@ -213,45 +241,104 @@ class UR5eMoveGroup(object):
         else:
             return self.move_group.get_current_pose().pose
 
-    def go_to_joint_state(self, joint_goal: List[float], tol: float = 0.01):
-        self.switch_controller(MOVEIT_CONTROLLER)
-        # The go command can be called with joint values, poses, or without any
-        # parameters if you have already set the pose or joint target for the group
-        self.move_group.go(joint_goal, wait=True)
-        # Calling ``stop()`` ensures that there is no residual movement
-        self.move_group.stop()
-        return all_close(joint_goal, self.move_group.get_current_joint_values(), 0.01)
+    def get_current_joints(self, in_degrees: bool = False):
+        """
+        joint angle values in radians (or) degrees
+        """
+        return self.move_group.get_current_joint_values()
 
-    def go_to_pose_goal(
-        self, pose_goal: geometry_msgs.msg.Pose, cartesian_path=True, tol: float = 0.01
+    def go_to_joint_state(
+        self,
+        joint_goal: List[float],
+        cartesian_path: bool = False,
+        tolerance: float = 0.001,
+        velocity_scaling: float = 0.25,
+        acc_scaling: float = 0.25,
+        wait: bool = True,
     ):
         self.switch_controller(MOVEIT_CONTROLLER)
-        if not cartesian_path:
-            self.move_group.set_pose_target(pose_goal)
-            # Call the planner to compute the plan and execute it.
-            plan = self.move_group.go(wait=True)
-            # Calling `stop()` ensures that there is no residual movement
-            self.move_group.stop()
-            # It is always good to clear your targets after planning with poses.
-            # Note: there is no equivalent function for clear_joint_value_targets()
-            self.move_group.clear_pose_targets()
-        else:
-            # eef_step specifies the resolution of interpolation jump threshold in joint space
-            (plan, fraction) = self.move_group.compute_cartesian_path(
-                waypoints=[pose_goal], eef_step=0.01, jump_threshold=0.0
-            )
+        # Check if MoveIt planner is running
+        rospy.wait_for_service("/plan_kinematic_path", self.timeout)
+        # Create a motion planning request with all necessary goals and constraints
+        mp_req = mi_msg.MotionPlanRequest()
+        mp_req.planner_id = "LIN" if cartesian_path else "PTP"
+        mp_req.group_name = "manipulator"
+        mp_req.num_planning_attempts = 1
 
-            if fraction < 1.0:
-                raise "Full trajectory could not be followed"
-            ## **Note:** The robot's current joint state must be within some tolerance of the
-            ## first waypoint in the `RobotTrajectory`_ or ``execute()`` will fail
-            self.move_group.execute(plan, wait=True)
+        constraints = mi_msg.Constraints()
+        for joint_no in range(len(self.JOINTS)):
+            constraints.joint_constraints.append(mi_msg.JointConstraint())
+            constraints.joint_constraints[-1].joint_name = self.JOINTS[joint_no]
+            constraints.joint_constraints[-1].position = joint_goal[joint_no]
+            constraints.joint_constraints[-1].tolerance_above = tolerance
+            constraints.joint_constraints[-1].tolerance_below = tolerance
+
+        mp_req.goal_constraints.append(constraints)
+        mp_req.max_velocity_scaling_factor = velocity_scaling
+        mp_req.max_acceleration_scaling_factor = acc_scaling
+
+        mp_res = self.get_plan(mp_req).motion_plan_response
+        if mp_res.error_code.val != mp_res.error_code.SUCCESS:
+            rospy.logerr("Planner failed to return a valid plan")
+            return False
+        goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
+        self.execute_plan.wait_for_server()
+        self.execute_plan.send_goal(goal)
+        if wait:
+            self.execute_plan.wait_for_result()
+            # Calling ``stop()`` ensures that there is no residual movement
+            self.move_group.stop()
+            return joints_close(joint_goal, self.get_current_joints(), tolerance)
+        return True
+
+    def go_to_pose_goal(
+        self,
+        pose_goal: Pose,
+        cartesian_path=True,
+        pos_tolerance: float = 0.0005,
+        orient_tolerance: float = 0.001,
+        velocity_scaling: float = 0.25,
+        acc_scaling: float = 0.25,
+        wait: bool = True,
+    ):
+        self.switch_controller(MOVEIT_CONTROLLER)
+        # Check if MoveIt planner is running
+        rospy.wait_for_service("/plan_kinematic_path", self.timeout)
+        # Create a motion planning request with all necessary goals and constraints
+        mp_req = mi_msg.MotionPlanRequest()
+        mp_req.planner_id = "LIN" if cartesian_path else "PTP"
+        mp_req.group_name = "manipulator"
+        mp_req.num_planning_attempts = 1
+
+        mp_req_pose_goal = PoseStamped(
+            header=std_msgs.msg.Header(frame_id=self.planning_frame), pose=pose_goal
+        )
+
+        constraints = constructGoalConstraints(
+            self.eef_frame, mp_req_pose_goal, pos_tolerance, orient_tolerance
+        )
+        mp_req.goal_constraints.append(constraints)
+        mp_req.max_velocity_scaling_factor = velocity_scaling
+        mp_req.max_acceleration_scaling_factor = acc_scaling
+
+        mp_res = self.get_plan(mp_req).motion_plan_response
+        if mp_res.error_code.val != mp_res.error_code.SUCCESS:
+            rospy.logerr("Planner failed to return a valid plan")
+            return False
+        goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
+        self.execute_plan.wait_for_server()
+        self.execute_plan.send_goal(goal)
+        if wait:
+            self.execute_plan.wait_for_result()
+            # Calling ``stop()`` ensures that there is no residual movement
+            self.move_group.stop()
+            return poses_close(
+                pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
+            )
+        return True
 
     def send_cartesian_pos_trajectory(
-        self,
-        pose_list: List[geometry_msgs.msg.Pose],
-        t_durations: List[float],
-        wait: bool = False,
+        self, pose_list: List[Pose], t_durations: List[float], wait: bool = False
     ):
         """
         Sends a cartesian position trajectory to the robot
@@ -272,7 +359,7 @@ class UR5eMoveGroup(object):
             result = self.trajectory_client.get_result()
             rospy.loginfo(f"Trajectory execution finished in state {result.error_code}")
 
-    def send_cartesian_vel_trajectory(self, twist: geometry_msgs.msg.Twist):
+    def send_cartesian_vel_trajectory(self, twist: Twist):
         """
         Sends a cartesian velocity set points to the robot
         """
@@ -281,33 +368,39 @@ class UR5eMoveGroup(object):
 
 
 def run():
-    rospy.sleep(10)
     robot_mg = UR5eMoveGroup()
-
+    # check movements with joint targets
     target_joint = [0, -np.pi / 2, np.pi / 2, 0, np.pi / 2, 0]
-    robot_mg.go_to_joint_state(target_joint)
-
-    pose = geometry_msgs.msg.Pose()
+    robot_mg.go_to_joint_state(target_joint, cartesian_path=False)
+    # check movements with pose targets
+    pose = Pose()
     pose.position.x = -0.6
     pose.position.y = -0.2
     pose.position.z = 0.6
-    pose.orientation.x = 0.5
-    pose.orientation.y = -0.5
-    pose.orientation.z = -0.5
-    pose.orientation.w = 0.5
+    pose.orientation.x = -0.5
+    pose.orientation.y = 0.5
+    pose.orientation.z = 0.5
+    pose.orientation.w = -0.5
     robot_mg.go_to_pose_goal(pose, cartesian_path=True)
-
+    # check pose trajectory control
     pose_list = []
     for i in range(4):
         pose_list.append(copy.deepcopy(pose))
-        pose_list[-1].position.y += 0.05 * (i+1)
+        pose_list[-1].position.y += 0.05 * (i + 1)
     duration_list = [1.5, 2.5, 3, 4]
     robot_mg.send_cartesian_pos_trajectory(pose_list, duration_list, wait=True)
-
-    twist = geometry_msgs.msg.Twist()
-    twist.linear.y = -0.05
-    robot_mg.send_cartesian_vel_trajectory(twist)
-    rospy.sleep(5)
+    # check velocity trajectory control
+    twist_time = 5
+    rot_speed = -0.05
+    t_step = 0.008
+    twist = Twist()
+    for t in np.arange(0, twist_time + t_step, t_step):
+        if t > (twist_time - 1):
+            twist.linear.y = rot_speed * max(0, (twist_time - t))
+        else:
+            twist.linear.y = rot_speed * min(1, t)
+        robot_mg.send_cartesian_vel_trajectory(twist)
+        rospy.sleep(t_step)
     twist.linear.y = 0
     robot_mg.send_cartesian_vel_trajectory(twist)
 
