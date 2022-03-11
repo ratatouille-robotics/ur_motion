@@ -6,11 +6,11 @@ import numpy as np
 
 from geometry_msgs.msg import Pose, Twist
 
-from ur_motion.motion_py import UR5eMoveGroup
+from motion.commander import RobotMoveGroup
 
 def run():
     rospy.init_node("ur5e_move_test")
-    robot_mg = UR5eMoveGroup()
+    robot_mg = RobotMoveGroup()
     # check movements with joint targets
     target_joint = [0, -np.pi / 2, np.pi / 2, 0, np.pi / 2, 0]
     robot_mg.go_to_joint_state(target_joint, cartesian_path=False)

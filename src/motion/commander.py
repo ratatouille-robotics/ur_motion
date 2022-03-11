@@ -3,7 +3,6 @@ from __future__ import print_function
 
 import sys
 import math
-import copy
 from typing import List, Union
 import numpy as np
 
@@ -34,6 +33,12 @@ from controller_manager_msgs.srv import (
     SwitchControllerRequest,
 )
 
+
+## Uncomment to use with Gazebo
+# MOVEIT_CONTROLLER = "pos_joint_traj_controller"
+# POSE_CONTROLLER = "pose_based_cartesian_traj_controller"
+# TWIST_CONTROLLER = "twist_controller"
+# avail_controllers = [MOVEIT_CONTROLLER]
 
 MOVEIT_CONTROLLER = "scaled_pos_joint_traj_controller"
 POSE_CONTROLLER = "pose_based_cartesian_traj_controller"
@@ -76,7 +81,7 @@ def poses_close(
     return d <= pos_tolerance and cos_phi_half >= math.cos(orient_tolerance / 2.0)
 
 
-class UR5eMoveGroup(object):
+class RobotMoveGroup(object):
 
     JOINTS = [
         "shoulder_pan_joint",
