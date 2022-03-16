@@ -236,7 +236,7 @@ class RobotMoveGroup(object):
 
         self._active_controller = target_controller
 
-    def get_current_pose(self, stamped: bool = False):
+    def get_current_pose(self, stamped: bool = False) -> Union[Pose, PoseStamped]:
         """
         position in metres. orientation in radians
         """
@@ -245,26 +245,30 @@ class RobotMoveGroup(object):
         else:
             return self.move_group.get_current_pose().pose
 
-    def get_current_joints(self, in_degrees: bool = False):
+    def get_current_joints(self, in_degrees: bool = False) -> List:
         """
         joint angle values in radians (or) degrees
         """
-        return self.move_group.get_current_joint_values()
+        joint_state = self.move_group.get_current_joint_values()
+        if in_degrees:
+            joint_state = [np.rad2deg(joint) for joint in joint_state]
+        return joint_state
 
     def go_to_joint_state(
         self,
         joint_goal: List[float],
         cartesian_path: bool = False,
         tolerance: float = 0.001,
-        velocity_scaling: float = 0.25,
-        acc_scaling: float = 0.25,
+        velocity_scaling: float = 0.2,
+        acc_scaling: float = 0.2,
         wait: bool = True,
-    ):
+    ) -> bool:
         self.switch_controller(MOVEIT_CONTROLLER)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
         mp_req = mi_msg.MotionPlanRequest()
+        mp_req.pipeline_id = "pilz_industrial_motion_planner"
         mp_req.planner_id = "LIN" if cartesian_path else "PTP"
         mp_req.group_name = "manipulator"
         mp_req.num_planning_attempts = 1
@@ -283,8 +287,18 @@ class RobotMoveGroup(object):
 
         mp_res = self.get_plan(mp_req).motion_plan_response
         if mp_res.error_code.val != mp_res.error_code.SUCCESS:
-            rospy.logerr("Planner failed to return a valid plan")
+            rospy.logerr(
+                "Planner failed to generate a valid plan to the goal joint_state"
+            )
             return False
+        if (len(mp_res.trajectory.joint_trajectory.points) > 1 and
+            mp_res.trajectory.joint_trajectory.points[-1].time_from_start
+            == mp_res.trajectory.joint_trajectory.points[-2].time_from_start
+        ):
+            mp_res.trajectory.joint_trajectory.points.pop(-2)
+            rospy.logwarn(
+                "Duplicate time stamp in the planned trajectory. Second last way-point was removed."
+            )
         goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
         self.execute_plan.wait_for_server()
         self.execute_plan.send_goal(goal)
@@ -301,15 +315,16 @@ class RobotMoveGroup(object):
         cartesian_path=True,
         pos_tolerance: float = 0.0005,
         orient_tolerance: float = 0.001,
-        velocity_scaling: float = 0.25,
-        acc_scaling: float = 0.25,
+        velocity_scaling: float = 0.2,
+        acc_scaling: float = 0.2,
         wait: bool = True,
-    ):
+    ) -> bool:
         self.switch_controller(MOVEIT_CONTROLLER)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
         mp_req = mi_msg.MotionPlanRequest()
+        mp_req.pipeline_id = "pilz_industrial_motion_planner"
         mp_req.planner_id = "LIN" if cartesian_path else "PTP"
         mp_req.group_name = "manipulator"
         mp_req.num_planning_attempts = 1
@@ -327,7 +342,7 @@ class RobotMoveGroup(object):
 
         mp_res = self.get_plan(mp_req).motion_plan_response
         if mp_res.error_code.val != mp_res.error_code.SUCCESS:
-            rospy.logerr("Planner failed to return a valid plan")
+            rospy.logerr("Planner failed to generate a valid plan to the goal pose")
             return False
         goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
         self.execute_plan.wait_for_server()
