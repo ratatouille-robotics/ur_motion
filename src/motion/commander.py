@@ -23,6 +23,8 @@ from cartesian_control_msgs.msg import (
 from moveit.core.kinematic_constraints import constructGoalConstraints
 from moveit_commander.conversions import pose_to_list
 from moveit_msgs.srv import GetMotionPlan
+from robotiq_urcap_control.msg import wrapper as gripperMsg
+from robotiq_urcap_control.msg import Robotiq2FGripper_robot_input as gripperStateMsg
 
 from controller_manager_msgs.srv import (
     LoadControllerRequest,
@@ -32,6 +34,7 @@ from controller_manager_msgs.srv import (
     SwitchController,
     SwitchControllerRequest,
 )
+from enum import Enum, IntEnum
 
 
 ## Uncomment to use with Gazebo
@@ -40,14 +43,27 @@ from controller_manager_msgs.srv import (
 # TWIST_CONTROLLER = "twist_controller"
 # avail_controllers = [MOVEIT_CONTROLLER]
 
-MOVEIT_CONTROLLER = "scaled_pos_joint_traj_controller"
-POSE_CONTROLLER = "pose_based_cartesian_traj_controller"
-TWIST_CONTROLLER = "twist_controller"
 
-avail_controllers = [MOVEIT_CONTROLLER, POSE_CONTROLLER, TWIST_CONTROLLER]
+class Controllers(Enum):
+    MOVEIT = "scaled_pos_joint_traj_controller"
+    POSE = "pose_based_cartesian_traj_controller"
+    TWIST = "twist_controller"
+    JOINT_STATE = "joint_state_controller"
 
 
-def joints_close(goal: List, actual: List, tolerance: float):
+class GripperStates(IntEnum):
+    OPEN = 0
+    CLOSE = 255
+
+
+_available_controllers = [
+    Controllers.MOVEIT,
+    Controllers.POSE,
+    Controllers.TWIST,
+]
+
+
+def _joints_close(goal: List, actual: List, tolerance: float):
     """
     Check if the joint values in two lists are within a tolerance of each other
     """
@@ -61,7 +77,7 @@ def joints_close(goal: List, actual: List, tolerance: float):
     return True
 
 
-def poses_close(
+def _poses_close(
     goal: Union[Pose, PoseStamped],
     actual: Union[Pose, PoseStamped],
     pos_tolerance: float,
@@ -108,6 +124,9 @@ class RobotMoveGroup(object):
         "wrist_3_joint",
     ]
 
+    GRIPPER_SPEED_DEFAULT = 100
+    GRIPPER_FORCE_DEFAULT = 100
+
     def __init__(self, verbose: bool = False) -> None:
 
         self._verbose = verbose
@@ -115,6 +134,11 @@ class RobotMoveGroup(object):
         moveit_commander.roscpp_initialize(sys.argv)
         # set a default timeout threshold non-motion requests
         self.timeout = rospy.Duration(5)
+
+        self.gripper_pub = rospy.Publisher("/move_gripper", gripperMsg, queue_size=10)
+        self.gripper_sub = rospy.Subscriber(
+            "/Robotiq2FGripperRobotInput", gripperStateMsg, self.update_gripper_state
+        )
 
         # setup controller-manager ROS services
         self.switch_srv = rospy.ServiceProxy(
@@ -182,10 +206,10 @@ class RobotMoveGroup(object):
             rospy.logerr("Could not reach Load Controller service. Msg: {}".format(err))
             sys.exit(-1)
 
-        for controller in avail_controllers:
+        for controller in _available_controllers:
             if controller not in loaded_controllers:
                 srv = LoadControllerRequest()
-                srv.name = controller
+                srv.name = controller.name
                 self.load_srv(srv)
 
     def switch_controller(self, target_controller: str):
@@ -207,13 +231,13 @@ class RobotMoveGroup(object):
             controller.name
             for controller in resp.controller
             if controller.state == "running"
-            and controller.name != "joint_state_controller"
+            and controller.name != Controllers.JOINT_STATE.name
         ]
         if target_controller not in stop_controllers:
-            start_controller = [target_controller]
+            start_controller = [target_controller.name]
         else:
             start_controller = []
-            stop_controllers.remove(target_controller)
+            stop_controllers.remove(target_controller.name)
 
         if len(start_controller) != 0 or len(stop_controllers) != 0:
             try:
@@ -235,7 +259,7 @@ class RobotMoveGroup(object):
                     f"Error when starting {target_controller} and stopping {stop_controllers}"
                 )
 
-        if target_controller == POSE_CONTROLLER:
+        if target_controller == Controllers.POSE:
             self.trajectory_client = actionlib.SimpleActionClient(
                 "{}/follow_cartesian_trajectory".format(target_controller),
                 FollowCartesianTrajectoryAction,
@@ -244,7 +268,7 @@ class RobotMoveGroup(object):
             if not self.trajectory_client.wait_for_server(self.timeout):
                 raise "Could not reach cartesian controller action"
 
-        elif target_controller == TWIST_CONTROLLER:
+        elif target_controller == Controllers.TWIST:
             self.twist_pub = rospy.Publisher(
                 "/twist_controller/command", Twist, queue_size=1
             )
@@ -279,7 +303,7 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(MOVEIT_CONTROLLER)
+        self.switch_controller(Controllers.MOVEIT)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
@@ -323,7 +347,7 @@ class RobotMoveGroup(object):
             self.execute_plan.wait_for_result()
             # Calling ``stop()`` ensures that there is no residual movement
             self.move_group.stop()
-            return joints_close(joint_goal, self.get_current_joints(), tolerance)
+            return _joints_close(joint_goal, self.get_current_joints(), tolerance)
         return True
 
     def go_to_pose_goal(
@@ -336,7 +360,7 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(MOVEIT_CONTROLLER)
+        self.switch_controller(Controllers.MOVEIT)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
@@ -368,7 +392,7 @@ class RobotMoveGroup(object):
             self.execute_plan.wait_for_result()
             # Calling ``stop()`` ensures that there is no residual movement
             self.move_group.stop()
-            return poses_close(
+            return _poses_close(
                 pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
             )
         return True
@@ -379,7 +403,7 @@ class RobotMoveGroup(object):
         """
         Sends a cartesian position trajectory to the robot
         """
-        self.switch_controller(POSE_CONTROLLER)
+        self.switch_controller(Controllers.POSE)
 
         goal = FollowCartesianTrajectoryGoal()
 
@@ -399,5 +423,40 @@ class RobotMoveGroup(object):
         """
         Sends a cartesian velocity set points to the robot
         """
-        self.switch_controller(TWIST_CONTROLLER)
+        self.switch_controller(Controllers.TWIST)
         self.twist_pub.publish(twist)
+
+    def update_gripper_state(self, data):
+        """
+        Update gripper state variable to reflect current state of the gripper.
+        """
+        self.gripper_state = data.gOBJ
+
+    def move_gripper_to_state(self, target_state: int):
+        """
+        Move gripper to given state.
+        """
+        assert GripperStates.OPEN <= target_state <= GripperStates.CLOSE
+        if self._verbose:
+            print(f"Moving gripper to state {target_state}")
+        gripper_message = gripperMsg()
+        gripper_message.pos = target_state
+        gripper_message.speed = 100
+        gripper_message.force = 100
+        self.gripper_pub.publish(gripper_message)
+
+    def open_gripper(self):
+        """
+        Open gripper.
+        """
+        if self._verbose:
+            print("Opening gripper")
+        self.move_gripper_to_state(GripperStates.OPEN)
+
+    def close_gripper(self):
+        """
+        Close gripper.
+        """
+        if self._verbose:
+            print("Closing gripper")
+        self.move_gripper_to_state(GripperStates.CLOSE)
