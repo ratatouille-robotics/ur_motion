@@ -28,16 +28,16 @@ def run():
     robot_mg = RobotMoveGroup(verbose=True)
 
     # open gripper and go to home position
-    robot_mg.open_gripper()
-    robot_mg.go_to_joint_state(HOME_POSITION_JOINT)
+    robot_mg.open_gripper() or sys.exit(1)
+    robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
     # go to ingredient position and grip container
     robot_mg.go_to_pose_goal(
         make_pose(INGREDIENT_POSITION[:3], INGREDIENT_POSITION[3:]),
         cartesian_path=True,
         acc_scaling=0.1,
-    )
-    robot_mg.close_gripper()
+    ) or sys.exit(1)
+    robot_mg.close_gripper() or sys.exit(1)
 
     print("Press any key to continue:")
     input()
@@ -47,60 +47,60 @@ def run():
         offset_pose(robot_mg.get_current_pose(), [0, 0.2, 0.05]),
         cartesian_path=True,
         acc_scaling=0.1,
-    )
+    ) or sys.exit(1)
 
     # rotate right / go to pre-dispense position
-    robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT)
+    robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT) or sys.exit(1)
 
     # go to dispense position
     robot_mg.go_to_pose_goal(
         make_pose(DISPENSE_POSITION[:3], DISPENSE_POSITION[3:]), cartesian_path=True
-    )
+    ) or sys.exit(1)
 
     # dispense - container tilt
     robot_mg.go_to_joint_state(
         offset_joint(robot_mg.get_current_joints(), [0, 0, 0, 0, 0, 3 * np.pi / 4])
-    )
+    ) or sys.exit(1)
     # container tilt upright
     robot_mg.go_to_joint_state(
         offset_joint(robot_mg.get_current_joints(), [0, 0, 0, 0, 0, -3 * np.pi / 4])
-    )
+    ) or sys.exit(1)
 
     # go to pre-dispense position
-    robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT)
+    robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT) or sys.exit(1)
 
     # go to home position
-    robot_mg.go_to_joint_state(HOME_POSITION_JOINT)
+    robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
     # go up a little to prevent container hitting the shelf
     robot_mg.go_to_pose_goal(
         offset_pose(robot_mg.get_current_pose(), [0, 0, 0.07]),
         cartesian_path=True,
         acc_scaling=0.1,
-    )
+    ) or sys.exit(1)
 
     # go to ingredient position
     robot_mg.go_to_pose_goal(
         make_pose(INGREDIENT_POSITION[:3], INGREDIENT_POSITION[3:]),
         cartesian_path=True,
         acc_scaling=0.1,
-    )
+    ) or sys.exit(1)
 
     print("Press any key to continue:")
     input()
 
     # release container
-    robot_mg.open_gripper()
+    robot_mg.open_gripper() or sys.exit(1)
 
     # go back from container
     robot_mg.go_to_pose_goal(
         offset_pose(robot_mg.get_current_pose(), [0, 0.2, 0.05]),
         cartesian_path=True,
         acc_scaling=0.1,
-    )
+    ) or sys.exit(1)
 
     # go to home position
-    robot_mg.go_to_joint_state(HOME_POSITION_JOINT)
+    robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
 
 if __name__ == "__main__":
