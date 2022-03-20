@@ -5,6 +5,7 @@ import sys
 import math
 from typing import List, Union
 import numpy as np
+import time
 
 import rospy
 import actionlib
@@ -54,6 +55,13 @@ class Controllers(Enum):
 class GripperStates(IntEnum):
     OPEN = 0
     CLOSE = 255
+
+
+class GripperMotionStates(IntEnum):
+    MOVING = 0
+    STOPPED_BARRIER_OUTSIDE = 1
+    STOPPED_BARRIER_INSIDE = 2
+    REACHED = 3
 
 
 _available_controllers = [
@@ -136,9 +144,10 @@ class RobotMoveGroup(object):
         self.timeout = rospy.Duration(5)
 
         self.gripper_pub = rospy.Publisher("/move_gripper", gripperMsg, queue_size=10)
-        self.gripper_sub = rospy.Subscriber(
+        rospy.Subscriber(
             "/Robotiq2FGripperRobotInput", gripperStateMsg, self.update_gripper_state
         )
+        self.gripper_motion_state = GripperMotionStates.REACHED
 
         # setup controller-manager ROS services
         self.switch_srv = rospy.ServiceProxy(
@@ -426,15 +435,15 @@ class RobotMoveGroup(object):
         self.switch_controller(Controllers.TWIST)
         self.twist_pub.publish(twist)
 
-    def update_gripper_state(self, data):
+    def update_gripper_state(self, data) -> None:
         """
-        Update gripper state variable to reflect current state of the gripper.
+        Updates self.gripper_motion_state to reflect current motion state of gripper.
         """
-        self.gripper_state = data.gOBJ
+        self.gripper_motion_state = data.gOBJ
 
-    def move_gripper_to_state(self, target_state: int):
+    def go_to_gripper_state(self, target_state: int) -> bool:
         """
-        Move gripper to given state.
+        Moves gripper to given state.
         """
         assert GripperStates.OPEN <= target_state <= GripperStates.CLOSE
         if self._verbose:
@@ -444,19 +453,25 @@ class RobotMoveGroup(object):
         gripper_message.speed = 100
         gripper_message.force = 100
         self.gripper_pub.publish(gripper_message)
+        start = time.time()
+        while self.gripper_motion_state == GripperMotionStates.MOVING:
+            rospy.sleep(0.1)
+            if time.time() > start + 10:
+                return False
+        return True
 
-    def open_gripper(self):
+    def open_gripper(self) -> bool:
         """
-        Open gripper.
+        Opens gripper.
         """
         if self._verbose:
             print("Opening gripper")
-        self.move_gripper_to_state(GripperStates.OPEN)
+        return self.go_to_gripper_state(GripperStates.OPEN)
 
-    def close_gripper(self):
+    def close_gripper(self) -> bool:
         """
-        Close gripper.
+        Closes gripper.
         """
         if self._verbose:
             print("Closing gripper")
-        self.move_gripper_to_state(GripperStates.CLOSE)
+        return self.go_to_gripper_state(GripperStates.CLOSE)
