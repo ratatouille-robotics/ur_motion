@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<launch>
+  <!--
+    Main entry point for loading a single UR5e into Gazebo, in isolation, in the
+    empty world.
+
+    A set of ros_control controllers similar to those loaded by ur_robot_driver
+    will be loaded by 'ur_control.launch.xml' (note: *similar*, *not* identical).
+
+    This bringup .launch file is intentionally given the same name as the one in
+    the ur_robot_driver package, as it fulfills a similar role: loading the
+    configuration and starting the necessary ROS nodes which in the end provide
+    a ROS API to a Universal Robots UR5e. Only in this case, instead of a real
+    robot, a virtual model in Gazebo is used.
+
+    NOTE 1: as this is not a real robot, there are limits to the faithfulness
+    of the simulation. Dynamic behaviour will be different from a real robot.
+    Only a subset of topics, actions and services is supported. Specifically,
+    interaction with the Control Box itself is not supported, as Gazebo does not
+    simulate a Control Box. This means: no Dashboard server, no URScript topic
+    and no force-torque sensor among other things.
+
+    NOTE 2: users wishing to integrate a UR5e with other models into a more
+    complex simulation should NOT modify this file. Instead, if it would be
+    desirable to reuse this file with a custom simulation, they should create a
+    copy and update this copy so as to accomodate required changes.
+
+    In those cases, treat this file as an example, showing one way how a Gazebo
+    simulation for UR robots *could* be launched. It is not necessary to mimic
+    this setup completely.
+  -->
+
+  <!--Robot description and related parameter files -->
+  <arg name="robot_ip" default="10.0.0.2" doc="UR5's IP"/>
+  <arg name="kinematics_config" default="/home/ratatouille/my_robot_calibration.yaml"/>
+  <arg name="rviz_config" default="$(find ur5e_moveit_config)/launch/moveit_ratatouille_pose_estimation.rviz"/>
+  <arg name="realsense_camera_type" default="d435"/>
+
+  <!-- Robot bringup -->
+  <!-- <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">
+    <arg name="kinematics_config" value="$(arg kinematics_config)"/>
+    <arg name="robot_ip" value="$(arg robot_ip)"/>
+  </include> -->
+
+  <!-- UR5e Moveit -->
+  <include file="$(find ur5e_moveit_config)/launch/ur5e_moveit_planning_execution.launch">
+  </include>
+
+  <!-- RealSense Camera -->
+  <include file="$(find realsense2_camera)/launch/rs_rgbd.launch">
+    <arg name="device_type" value="$(arg realsense_camera_type)"/>
+    <arg name="enable_depth" value="true"/>
+  </include>
+  <include file="$(find ar_track_alvar)/launch/realsense_rgb_track.launch"/>
+
+  <!-- Rviz launch -->
+  <include file="$(find ur5e_moveit_config)/launch/moveit_rviz.launch">
+    <arg name="rviz_config" value="$(arg rviz_config)"/>
+  </include>
+
+  <!-- Robot Gripper controller -->
+  <node pkg="robotiq_urcap_control" type="robotic_urcap_ctrl_py3_wrapper.py" name="robotiq_urcap_control">
+    <!--<param name="publish_frequency" type="double" value="$(arg tf_pub_rate)" />
+    <param name="tf_prefix" value="$(arg tf_prefix)" />  -->
+  </node>
+
+</launch>
