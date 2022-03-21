@@ -45,7 +45,7 @@ from enum import Enum, IntEnum
 # avail_controllers = [MOVEIT_CONTROLLER]
 
 
-class Controllers(Enum):
+class Controllers(str, Enum):
     MOVEIT = "scaled_pos_joint_traj_controller"
     POSE = "pose_based_cartesian_traj_controller"
     TWIST = "twist_controller"
@@ -216,9 +216,10 @@ class RobotMoveGroup(object):
             sys.exit(-1)
 
         for controller in _available_controllers:
+            print(f'Controller : {controller.name}')
             if controller not in loaded_controllers:
                 srv = LoadControllerRequest()
-                srv.name = controller.name
+                srv.name = controller
                 self.load_srv(srv)
 
     def switch_controller(self, target_controller: str):
@@ -240,13 +241,13 @@ class RobotMoveGroup(object):
             controller.name
             for controller in resp.controller
             if controller.state == "running"
-            and controller.name != Controllers.JOINT_STATE.name
+            and controller.name != Controllers.JOINT_STATE
         ]
         if target_controller not in stop_controllers:
-            start_controller = [target_controller.name]
+            start_controller = [target_controller]
         else:
             start_controller = []
-            stop_controllers.remove(target_controller.name)
+            stop_controllers.remove(target_controller)
 
         if len(start_controller) != 0 or len(stop_controllers) != 0:
             try:
@@ -441,7 +442,7 @@ class RobotMoveGroup(object):
         """
         self.gripper_motion_state = data.gOBJ
 
-    def go_to_gripper_state(self, target_state: int) -> bool:
+    def go_to_gripper_state(self, target_state: int, wait=False) -> bool:
         """
         Moves gripper to given state.
         """
@@ -454,24 +455,25 @@ class RobotMoveGroup(object):
         gripper_message.force = 100
         self.gripper_pub.publish(gripper_message)
         start = time.time()
-        while self.gripper_motion_state == GripperMotionStates.MOVING:
-            rospy.sleep(0.1)
-            if time.time() > start + 10:
-                return False
+        if wait:
+            while self.gripper_motion_state == GripperMotionStates.MOVING:
+                rospy.sleep(0.1)
+                if time.time() > start + 10:
+                    return False
         return True
 
-    def open_gripper(self) -> bool:
+    def open_gripper(self, wait=False) -> bool:
         """
         Opens gripper.
         """
         if self._verbose:
             print("Opening gripper")
-        return self.go_to_gripper_state(GripperStates.OPEN)
+        return self.go_to_gripper_state(GripperStates.OPEN, wait)
 
-    def close_gripper(self) -> bool:
+    def close_gripper(self, wait=False) -> bool:
         """
         Closes gripper.
         """
         if self._verbose:
             print("Closing gripper")
-        return self.go_to_gripper_state(GripperStates.CLOSE)
+        return self.go_to_gripper_state(GripperStates.CLOSE, wait)
