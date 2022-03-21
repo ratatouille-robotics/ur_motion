@@ -17,7 +17,7 @@ from motion.utils import offset_pose, offset_joint, make_pose
 
 # taped container position pre grasp/home
 HOME_POSITION_JOINT = [0.733216, -2.303996, 2.222002, -3.058677, -0.733774, 3.14139]
-INGREDIENT_POSITION = [0.0099, -0.4699, 0.6450, 0.7071068, 0.0, 0.0, 0.7071068]
+INGREDIENT_POSITION = [0.0099, -0.4699, 0.6575, 0.7071068, 0.0, 0.0, 0.7071068]
 # [-0.0216083012128164, -0.2808664510261085, 0.7377250673870849, -0.6857402840447018, -0.012217903053823087, -0.01605485599230219, -0.7273590500971724]
 DISPENSE_POSITION = [-0.4698, 0.0, 0.2950, 0.5, -0.5, -0.5, 0.5]
 PRE_DISPENSE_POSITION_CARTESIAN = [-0.2698, 0.0, 0.0, 0.6950, 0.5, -0.5, -0.5, 0.5]
@@ -34,6 +34,10 @@ PRE_DISPENSE_POSITION_JOINT = [
 def run():
     rospy.init_node("ur5e_move_test")
     rate = rospy.Rate(10.0)
+    tfBuffer = tf2_ros.Buffer()
+    tf2_ros.TransformListener(tfBuffer)
+
+
     robot_mg = RobotMoveGroup(verbose=True)
 
     # open gripper and go to home position
@@ -43,83 +47,38 @@ def run():
     print("Reach home position. Press any key to begin searching for markers:")
     input()
 
-    broadcaster = tf2_ros.StaticTransformBroadcaster()
-    static_transformStamped = TransformStamped()
-
-    static_transformStamped.header.stamp = rospy.Time.now()
-    static_transformStamped.header.frame_id = "ar_marker_2"
-    static_transformStamped.child_frame_id = "ar_marker_2_pregrasp"
-
-    static_transformStamped.transform.translation.x = 0
-    static_transformStamped.transform.translation.y = -0.05
-    static_transformStamped.transform.translation.z = 0.30
+    pose_marker_marker_frame = Pose()
+    pose_marker_marker_frame.position.y = -0.05
+    pose_marker_marker_frame.position.z = 0.30
 
     quat = quaternion_from_euler(0, math.pi, 0)
-    static_transformStamped.transform.rotation.x = quat[0]
-    static_transformStamped.transform.rotation.y = quat[1]
-    static_transformStamped.transform.rotation.z = quat[2]
-    static_transformStamped.transform.rotation.w = quat[3]
+    pose_marker_marker_frame.orientation.x = quat[0]
+    pose_marker_marker_frame.orientation.y = quat[1]
+    pose_marker_marker_frame.orientation.z = quat[2]
+    pose_marker_marker_frame.orientation.w = quat[3]
 
-    broadcaster.sendTransform(static_transformStamped)
+    pose_stamped_marker_marker_frame = PoseStamped()
+    pose_stamped_marker_marker_frame.pose = pose_marker_marker_frame
+    pose_stamped_marker_marker_frame.header.frame_id = 'ar_marker_2'
+    pose_stamped_marker_marker_frame.header.stamp = rospy.Time.now()
 
-    # while not rospy.is_shutdown():
-    #     rate.sleep()
+    try:
+        # ** It is important to wait for the listener to start listening. Hence the rospy.Duration(1)
+        pose_marker_base_frame = tfBuffer.transform(pose_stamped_marker_marker_frame, 'base_link', rospy.Duration(1))
+        rospy.loginfo(pose_marker_base_frame)
 
-    tfBuffer = tf2_ros.Buffer()
-    tf2_ros.TransformListener(tfBuffer)
+    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+        raise
 
-    # q_rot = quaternion_from_euler(0, 0, math.pi)
-
-    transform = None
-    while not rospy.is_shutdown() and transform is None:
-        try:
-            transform = tfBuffer.lookup_transform(
-                "base_link", "ar_marker_2_pregrasp", rospy.Time()
-            )
-            transform = transform.transform
-            rospy.loginfo(transform)
-            # q_new = q_rot.copy()
-            # q_new[0] = transform.rotation.x
-            # q_new[1] = transform.rotation.y
-            # q_new[2] = transform.rotation.z
-            # q_new[3] = transform.rotation.w
-            # quaternion = quaternion_multiply(q_rot, q_new)
-        except (
-            tf2_ros.LookupException,
-            tf2_ros.ConnectivityException,
-            tf2_ros.ExtrapolationException,
-        ):
-            rate.sleep()
-            continue
-        rate.sleep()
-
-    # pose_marker = [
-    #     transform.translation.x,
-    #     transform.translation.y,
-    #     transform.translation.z,
-    #     quaternion[0],
-    #     quaternion[1],
-    #     quaternion[2],
-    #     quaternion[3],
-    # ]
-    pose_marker = [
-        transform.translation.x,
-        transform.translation.y,
-        transform.translation.z,
-        transform.rotation.x,
-        transform.rotation.y,
-        transform.rotation.z,
-        transform.rotation.w,
-    ]
     rospy.loginfo("Target pose:")
-    rospy.loginfo(pose_marker)
+    rospy.loginfo(pose_marker_base_frame.pose)
 
     print("Press key to start moving towards object:")
     input()
 
     # # go to pre-grasp position
     robot_mg.go_to_pose_goal(
-        make_pose(pose_marker[:3], pose_marker[3:]),
+        pose_marker_base_frame.pose,
         cartesian_path=True,
         acc_scaling=0.1,
     ) #or sys.exit(1) #TODO-nevalsar, harshita
@@ -191,7 +150,7 @@ def run():
 
     # go up a little to prevent container hitting the shelf
     robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, 0, 0.07]),
+        offset_pose(robot_mg.get_current_pose(), [0, 0, 0.10]),
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
