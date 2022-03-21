@@ -5,10 +5,11 @@ import sys
 import rospy
 import numpy as np
 import tf2_ros
+from tf2_geometry_msgs.tf2_geometry_msgs import PoseStamped
 from tf.transformations import *
 import math
 import time
-from geometry_msgs.msg import Quaternion, TransformStamped
+from geometry_msgs.msg import Quaternion, TransformStamped, Pose
 
 from motion.commander import RobotMoveGroup
 from motion.utils import offset_pose, offset_joint, make_pose
@@ -38,6 +39,9 @@ def run():
     # open gripper and go to home position
     robot_mg.open_gripper() or sys.exit(1)
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
+
+    print("Reach home position. Press any key to begin searching for markers:")
+    input()
 
     broadcaster = tf2_ros.StaticTransformBroadcaster()
     static_transformStamped = TransformStamped()
@@ -120,11 +124,32 @@ def run():
         acc_scaling=0.1,
     ) #or sys.exit(1) #TODO-nevalsar, harshita
 
+
+    pose_marker_wrist_frame = Pose()
+    pose_marker_wrist_frame.position.z = 0.175
+    pose_marker_wrist_frame.orientation.w = 1
+
+    pose_stamped_wrist_frame = PoseStamped()
+    pose_stamped_wrist_frame.pose = pose_marker_wrist_frame
+    pose_stamped_wrist_frame.header.frame_id = 'wrist_3_link'
+    pose_stamped_wrist_frame.header.stamp = rospy.Time.now()
+
+
+    try:
+        # ** It is important to wait for the listener to start listening. Hence the rospy.Duration(1)
+        pose_marker_base_frame = tfBuffer.transform(pose_stamped_wrist_frame, 'base_link', rospy.Duration(1))
+        rospy.loginfo(pose_marker_base_frame)
+
+    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+        raise
+
+
+
     print("Reached pre-grasp. Going to gripping position next.")
     input()
     # go to ingredient gripping position
     robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, -0.2, 0]),
+        pose_marker_base_frame.pose,
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
