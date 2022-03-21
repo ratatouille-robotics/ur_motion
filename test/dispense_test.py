@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from multiprocessing.connection import wait
 import sys
 import rospy
 import numpy as np
@@ -37,7 +38,7 @@ def run():
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
-    robot_mg.close_gripper() or sys.exit(1)
+    robot_mg.close_gripper(wait=True) or sys.exit(1)
 
     print("Press any key to continue:")
     input()
