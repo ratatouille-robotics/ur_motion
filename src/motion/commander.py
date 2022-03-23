@@ -183,7 +183,7 @@ class RobotMoveGroup(object):
             return
 
         self.move_group.stop()
-        rospy.sleep(1)
+        rospy.sleep(0.1)
 
         srv = ListControllersRequest()
         resp = self.list_srv(srv)
@@ -232,7 +232,7 @@ class RobotMoveGroup(object):
             self.twist_pub = rospy.Publisher(
                 "/twist_controller/command", Twist, queue_size=1
             )
-            rospy.sleep(1)
+            rospy.sleep(0.1)
 
         self._active_controller = target_controller
 
