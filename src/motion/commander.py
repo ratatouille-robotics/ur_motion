@@ -53,6 +53,10 @@ def joints_close(goal: List, actual: List, tolerance: float):
     """
     for index in range(len(goal)):
         if abs(actual[index] - goal[index]) > tolerance:
+            err = goal[index] - actual[index]
+            rospy.logwarn(
+                f"Joint error ({err} rad) is greater than the tolerance ({tolerance} rad)"
+            )
             return False
     return True
 
@@ -76,9 +80,21 @@ def poses_close(
     x1, y1, z1, qx1, qy1, qz1, qw1 = pose_to_list(goal)
     # Euclidean distance
     d = math.dist((x1, y1, z1), (x0, y0, z0))
-    # phi = angle between orientations
+    # angle between orientations
     cos_phi_half = math.fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
-    return d <= pos_tolerance and cos_phi_half >= math.cos(orient_tolerance / 2.0)
+    phi = 2 * np.arccos(cos_phi_half)
+    result = True
+    if d > pos_tolerance:
+        rospy.logwarn(
+            f"Position error ({d} m) is greater than the tolerance ({pos_tolerance} m)"
+        )
+        result = False
+    if phi > orient_tolerance:
+        rospy.logwarn(
+            f"Orientation error ({phi} rad) is greater than the tolerance ({orient_tolerance} rad)"
+        )
+        result = False
+    return result
 
 
 class RobotMoveGroup(object):
@@ -291,8 +307,9 @@ class RobotMoveGroup(object):
                 "Planner failed to generate a valid plan to the goal joint_state"
             )
             return False
-        if (len(mp_res.trajectory.joint_trajectory.points) > 1 and
-            mp_res.trajectory.joint_trajectory.points[-1].time_from_start
+        if (
+            len(mp_res.trajectory.joint_trajectory.points) > 1
+            and mp_res.trajectory.joint_trajectory.points[-1].time_from_start
             == mp_res.trajectory.joint_trajectory.points[-2].time_from_start
         ):
             mp_res.trajectory.joint_trajectory.points.pop(-2)
@@ -313,8 +330,8 @@ class RobotMoveGroup(object):
         self,
         pose_goal: Pose,
         cartesian_path=True,
-        pos_tolerance: float = 0.0005,
-        orient_tolerance: float = 0.001,
+        pos_tolerance: float = 0.001,
+        orient_tolerance: float = 0.01,
         velocity_scaling: float = 0.2,
         acc_scaling: float = 0.2,
         wait: bool = True,
