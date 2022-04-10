@@ -64,4 +64,8 @@
     <param name="tf_prefix" value="$(arg tf_prefix)" />  -->
   </node>
 
+  <!-- Pose estimation -->
+  <node pkg="ratatouille_pose_estimation" type="publish_marker_poses.py" name="ratatouille_pose_estimation">
+  </node>
+
 </launch>
