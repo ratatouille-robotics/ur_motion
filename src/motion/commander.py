@@ -50,6 +50,7 @@ class Controllers(str, Enum):
     POSE = "pose_based_cartesian_traj_controller"
     TWIST = "twist_controller"
     JOINT_STATE = "joint_state_controller"
+    FORCE = "force_torque_sensor_controller"
 
 
 class GripperStates(IntEnum):
@@ -216,7 +217,7 @@ class RobotMoveGroup(object):
             sys.exit(-1)
 
         for controller in _available_controllers:
-            print(f'Controller : {controller.name}')
+            print(f"Controller : {controller.name}")
             if controller not in loaded_controllers:
                 srv = LoadControllerRequest()
                 srv.name = controller
@@ -241,7 +242,7 @@ class RobotMoveGroup(object):
             controller.name
             for controller in resp.controller
             if controller.state == "running"
-            and controller.name != Controllers.JOINT_STATE
+            and controller.name not in [Controllers.JOINT_STATE, Controllers.FORCE]
         ]
         if target_controller not in stop_controllers:
             start_controller = [target_controller]
