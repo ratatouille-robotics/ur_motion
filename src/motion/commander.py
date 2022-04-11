@@ -443,7 +443,7 @@ class RobotMoveGroup(object):
         """
         self.gripper_motion_state = data.gOBJ
 
-    def go_to_gripper_state(self, target_state: int, wait=False) -> bool:
+    def go_to_gripper_state(self, target_state: int, wait=False, minWait=1.5) -> bool:
         """
         Moves gripper to given state.
         """
@@ -457,6 +457,8 @@ class RobotMoveGroup(object):
         self.gripper_pub.publish(gripper_message)
         start = time.time()
         if wait:
+            while time.time() < start + minWait:
+                pass
             while self.gripper_motion_state == GripperMotionStates.MOVING:
                 rospy.sleep(0.1)
                 if time.time() > start + 10:

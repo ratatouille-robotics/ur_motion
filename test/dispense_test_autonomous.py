@@ -4,6 +4,7 @@ import argparse
 from faulthandler import disable
 from multiprocessing.connection import wait
 import sys
+import time
 import rospy
 import numpy as np
 from tf2_geometry_msgs.tf2_geometry_msgs import PoseStamped
@@ -18,8 +19,9 @@ from ratatouille_pose_transforms.transforms import PoseTransforms
 # taped container position pre grasp/home
 HOME_POSITION_JOINT = [0.733216, -2.303996, 2.222002, -3.058677, -0.733774, 3.14139]
 INGREDIENT_POSITION = {
+    1: [0.26, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
     2: [0.01, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
-    4: [0.01, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
+    3: [-0.24, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
 }
 DISPENSE_POSITION = [-0.4698, 0.0, 0.2950, 0.5, -0.5, -0.5, 0.5]
 PRE_DISPENSE_POSITION_CARTESIAN = [-0.2698, 0.0, 0.0, 0.6950, 0.5, -0.5, -0.5, 0.5]
@@ -62,6 +64,9 @@ def run(disable_gripper: bool = False):
         acc_scaling=0.1,
     ) or sys.exit(1)
 
+    # print("Press any key to begin searching for markers")
+    # input()
+    time.sleep(1)
     ############################################################################
     # get pregrasp pose for ingredient
 
@@ -80,12 +85,15 @@ def run(disable_gripper: bool = False):
         header_frame_id="pregrasp_" + str(ingredient_id),
         base_frame_id="base_link",
     )
+    if target_pose is None:
+        print(f"Can't find ingredient! Exiting.")
+        sys.exit(1)
 
-    rospy.loginfo("Target pose:")
-    rospy.loginfo(target_pose.pose)
+    # rospy.loginfo("Target pose:")
+    # rospy.loginfo(target_pose.pose)
 
-    print("Press key to start moving towards object:")
-    input()
+    # print("Press key to start moving towards object:")
+    # input()
 
     ############################################################################
     # go to pre-grasp position
@@ -96,8 +104,8 @@ def run(disable_gripper: bool = False):
         acc_scaling=0.1,
     )  # or sys.exit(1) #TODO-nevalsar, harshita
 
-    print("Reached pre-grasp. Going to gripping position next.")
-    input()
+    # print("Reached pre-grasp. Going to gripping position next.")
+    # input()
 
     ############################################################################
     # compute gripping pose
@@ -139,8 +147,11 @@ def run(disable_gripper: bool = False):
     ) or sys.exit(1)
 
     ############################################################################
-    # rotate right / go to pre-dispense position
+    # go to home position
+    robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
+    ############################################################################
+    # rotate right / go to pre-dispense position
     robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT) or sys.exit(1)
 
     ############################################################################
@@ -174,14 +185,6 @@ def run(disable_gripper: bool = False):
 
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
-    ############################################################################
-    # go up a little (to prevent container hitting the shelf)
-
-    robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, 0, 0.10]),
-        cartesian_path=True,
-        acc_scaling=0.1,
-    ) or sys.exit(1)
 
     ############################################################################
     # go to ingredient view position
@@ -195,7 +198,19 @@ def run(disable_gripper: bool = False):
         acc_scaling=0.1,
     ) or sys.exit(1)
 
-    print("Press any key to continue:")
+    # print("At ingredient view position. Press key to continue:")
+    # input()
+
+    ############################################################################
+    # go up a little (to prevent container hitting the shelf)
+
+    robot_mg.go_to_pose_goal(
+        offset_pose(robot_mg.get_current_pose(), [0, 0, 0.075]),
+        cartesian_path=True,
+        acc_scaling=0.1,
+    ) or sys.exit(1)
+
+    print("Press key to go to ingredient position:")
     input()
 
     ############################################################################
@@ -207,19 +222,19 @@ def run(disable_gripper: bool = False):
         acc_scaling=0.1,
     ) or sys.exit(1)
 
-    print("Press any key to continue:")
-    input()
+    # print("Press any key to open gripper:")
+    # input()
 
     ############################################################################
     # release gripper
     if not disable_gripper:
-        robot_mg.open_gripper() or sys.exit(1)
+        robot_mg.open_gripper(wait=True) or sys.exit(1)
 
     ############################################################################
     # go back from container
 
     robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, 0.2, 0.05]),
+        offset_pose(robot_mg.get_current_pose(), [0, 0.30, 0.05]),
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
