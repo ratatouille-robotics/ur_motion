@@ -49,7 +49,7 @@ def run(disable_gripper: bool = False):
         robot_mg.open_gripper() or sys.exit(1)
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
-    print("Reached home position. Enter ingredient number:", end="")
+    print("Ready to dispense.\nEnter ingredient number:", end="")
     ingredient_id = int(input())
 
     ############################################################################
@@ -134,14 +134,26 @@ def run(disable_gripper: bool = False):
     if not disable_gripper:
         robot_mg.close_gripper(wait=True) or sys.exit(1)
 
-    print("Press any key to continue:")
-    input()
+    # print("Press any key to go to corrected ingredient position:")
+    # input()
 
     ############################################################################
-    # pick container and go back
+    # pick container and go to actual ingredient position
 
     robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, 0.2, 0.05]),
+        make_pose([
+            INGREDIENT_POSITION[ingredient_id][0],
+            INGREDIENT_POSITION[ingredient_id][1] - 0.20,
+            INGREDIENT_POSITION[ingredient_id][2] + 0.05
+        ], INGREDIENT_POSITION[ingredient_id][3:]), cartesian_path=True
+    ) or sys.exit(1)
+
+    # print("Moved to corrected ingredient position")
+    # input()
+
+    # go back out of shelf
+    robot_mg.go_to_pose_goal(
+        offset_pose(robot_mg.get_current_pose(), [0, 0.20, 0.00]),
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
@@ -210,8 +222,8 @@ def run(disable_gripper: bool = False):
         acc_scaling=0.1,
     ) or sys.exit(1)
 
-    print("Press key to go to ingredient position:")
-    input()
+    # print("Press key to go to ingredient position:")
+    # input()
 
     ############################################################################
     # go to ingredient position
@@ -234,7 +246,7 @@ def run(disable_gripper: bool = False):
     # go back from container
 
     robot_mg.go_to_pose_goal(
-        offset_pose(robot_mg.get_current_pose(), [0, 0.30, 0.05]),
+        offset_pose(robot_mg.get_current_pose(), [0, 0.20, 0.05]),
         cartesian_path=True,
         acc_scaling=0.1,
     ) or sys.exit(1)
@@ -254,7 +266,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    try:
+    # try:
+    #     run(disable_gripper=args.disable_gripper)
+    # except rospy.ROSInterruptException:
+    #     sys.exit(1)
+    while not rospy.is_shutdown():
         run(disable_gripper=args.disable_gripper)
-    except rospy.ROSInterruptException:
-        sys.exit(1)
