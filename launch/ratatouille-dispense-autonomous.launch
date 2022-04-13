@@ -31,10 +31,10 @@
   -->
 
   <!--Robot description and related parameter files -->
-  <arg name="robot_ip" default="10.0.0.2" doc="UR5's IP"/>
-  <arg name="kinematics_config" default="/home/ratatouille/my_robot_calibration.yaml"/>
-  <arg name="rviz_config" default="$(find ur5e_moveit_config)/launch/moveit_ratatouille_pose_estimation.rviz"/>
-  <arg name="realsense_camera_type" default="d435"/>
+  <arg name="robot_ip" default="10.0.0.2" doc="UR5's IP" />
+  <arg name="kinematics_config" default="/home/ratatouille/my_robot_calibration.yaml" />
+  <arg name="rviz_config" default="$(find ur5e_moveit_config)/launch/moveit_ratatouille_pose_estimation.rviz" />
+  <arg name="realsense_camera_type" default="d435" />
 
   <!-- Robot bringup -->
   <!-- <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">
@@ -43,19 +43,23 @@
   </include> -->
 
   <!-- UR5e Moveit -->
-  <include file="$(find ur5e_moveit_config)/launch/ur5e_moveit_planning_execution.launch">
-  </include>
+  <include file="$(find ur5e_moveit_config)/launch/ur5e_moveit_planning_execution.launch"></include>
 
   <!-- RealSense Camera -->
   <include file="$(find realsense2_camera)/launch/rs_rgbd.launch">
-    <arg name="device_type" value="$(arg realsense_camera_type)"/>
-    <arg name="enable_depth" value="true"/>
+    <arg name="device_type" value="$(arg realsense_camera_type)" />
+    <arg name="enable_depth" value="true" />
   </include>
-  <include file="$(find ar_track_alvar)/launch/realsense_rgb_track.launch"/>
+
+  <!-- April Tag Tracking -->
+  <include file="$(find ar_track_alvar)/launch/realsense_rgb_track.launch" />
+
+  <!-- Sensors -->
+  <include file="$(find sensor_interface)/launch/start_sensors.launch" />
 
   <!-- Rviz launch -->
   <include file="$(find ur5e_moveit_config)/launch/moveit_rviz.launch">
-    <arg name="rviz_config" value="$(arg rviz_config)"/>
+    <arg name="rviz_config" value="$(arg rviz_config)" />
   </include>
 
   <!-- Robot Gripper controller -->
@@ -65,7 +69,6 @@
   </node>
 
   <!-- Pose estimation -->
-  <node pkg="ratatouille_pose_estimation" type="publish_marker_poses.py" name="ratatouille_pose_estimation">
-  </node>
+  <node pkg="ratatouille_pose_estimation" type="publish_marker_poses.py" name="ratatouille_pose_estimation"></node>
 
 </launch>
