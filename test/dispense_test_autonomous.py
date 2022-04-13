@@ -119,7 +119,7 @@ def run(disable_gripper: bool = False):
     # input()
 
     ############################################################################
-    # compute gripping pose
+    # compute container gripping pose
     pose_marker_wrist_frame = Pose()
     pose_marker_wrist_frame.position.z = 0.175
     pose_marker_wrist_frame.orientation.w = 1
@@ -129,6 +129,21 @@ def run(disable_gripper: bool = False):
         header_frame_id="wrist_3_link",
         base_frame_id="base_link",
     )
+    # correct gripperangling upward issue
+    # add pitch correction to tilt gripper upward
+    _temp_euler = euler_from_quaternion(
+        (
+            pose_marker_base_frame.pose.orientation.x,
+            pose_marker_base_frame.pose.orientation.y,
+            pose_marker_base_frame.pose.orientation.z,
+            pose_marker_base_frame.pose.orientation.w,
+        )
+    )
+    _temp_quaternion = quaternion_from_euler(_temp_euler[0] + 0.04, _temp_euler[1], _temp_euler[2])
+    pose_marker_base_frame.pose.orientation.x = _temp_quaternion[0]
+    pose_marker_base_frame.pose.orientation.y = _temp_quaternion[1]
+    pose_marker_base_frame.pose.orientation.z = _temp_quaternion[2]
+    pose_marker_base_frame.pose.orientation.w = _temp_quaternion[3]
 
     ############################################################################
     # go to ingredient gripping position
@@ -187,7 +202,9 @@ def run(disable_gripper: bool = False):
     ) as f:
         DISPENSING_PARAMS = yaml.safe_load(f)
 
-    pos, orient = POURING_POSES[DISPENSING_PARAMS["container"]][DISPENSING_PARAMS["pouring_position"]]
+    pos, orient = POURING_POSES[DISPENSING_PARAMS["container"]][
+        DISPENSING_PARAMS["pouring_position"]
+    ]
     pre_dispense_pose = make_pose(pos, orient)
     assert robot_mg.go_to_pose_goal(
         pre_dispense_pose,
