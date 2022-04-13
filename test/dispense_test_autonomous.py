@@ -5,11 +5,14 @@ from faulthandler import disable
 from multiprocessing.connection import wait
 import sys
 import time
+import pathlib
 import rospy
+import yaml
 import numpy as np
 from tf2_geometry_msgs.tf2_geometry_msgs import PoseStamped
 from tf.transformations import *
 from geometry_msgs.msg import Quaternion, TransformStamped, Pose
+from dispense.dispense import Dispenser
 
 from motion.commander import RobotMoveGroup
 from motion.utils import offset_pose, offset_joint, make_pose
@@ -23,6 +26,7 @@ INGREDIENT_POSITION = {
     2: [0.01, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
     3: [-0.24, -0.2699, 0.66, 0.7071068, 0.0, 0.0, 0.7071068],
 }
+INGREDIENT_NAMES = {1: "peanuts", 2: "cucumber", 3: "vinegar"}
 DISPENSE_POSITION = [-0.4698, 0.0, 0.2950, 0.5, -0.5, -0.5, 0.5]
 PRE_DISPENSE_POSITION_CARTESIAN = [-0.2698, 0.0, 0.0, 0.6950, 0.5, -0.5, -0.5, 0.5]
 PRE_DISPENSE_POSITION_JOINT = [
@@ -34,6 +38,14 @@ PRE_DISPENSE_POSITION_JOINT = [
     3.14139,
 ]
 
+POURING_POSES = {
+    "regular": {
+        "corner": ([-0.425, -0.02, 0.5], [0.671, -0.613, -0.414, 0.048]),
+        "edge": ([-0.435, 0.250, 0.485], [0.852, -0.455, -0.205, 0.157]),
+    },
+    "liquid": {"corner": ([-0.365, -0.02, 0.450], [0.671, -0.613, -0.414, 0.048])},
+}
+
 
 def run(disable_gripper: bool = False):
     rospy.init_node("ur5e_move_test")
@@ -44,21 +56,21 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # open gripper and go to home position
-
     if not disable_gripper:
         robot_mg.open_gripper() or sys.exit(1)
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
     print("Ready to dispense.\nEnter ingredient number:", end="")
-    ingredient_id = int(input())
+    target_ingredient_id = int(input())
+    print("\nEnter quantity:", end="")
+    target_quantity = int(input())
 
     ############################################################################
     # go to expected ingredient location (from where marker is visible)
-
     robot_mg.go_to_pose_goal(
         make_pose(
-            INGREDIENT_POSITION[ingredient_id][:3],
-            INGREDIENT_POSITION[ingredient_id][3:],
+            INGREDIENT_POSITION[target_ingredient_id][:3],
+            INGREDIENT_POSITION[target_ingredient_id][3:],
         ),
         cartesian_path=True,
         acc_scaling=0.1,
@@ -82,7 +94,7 @@ def run(disable_gripper: bool = False):
 
     target_pose = pose_transformer.transform_pose_to_frame(
         pose_source=marker_origin,
-        header_frame_id="pregrasp_" + str(ingredient_id),
+        header_frame_id="pregrasp_" + str(target_ingredient_id),
         base_frame_id="base_link",
     )
     if target_pose is None:
@@ -97,7 +109,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go to pre-grasp position
-
     robot_mg.go_to_pose_goal(
         target_pose.pose,
         cartesian_path=True,
@@ -109,7 +120,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # compute gripping pose
-
     pose_marker_wrist_frame = Pose()
     pose_marker_wrist_frame.position.z = 0.175
     pose_marker_wrist_frame.orientation.w = 1
@@ -122,7 +132,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go to ingredient gripping position
-
     robot_mg.go_to_pose_goal(
         pose_marker_base_frame.pose,
         cartesian_path=True,
@@ -134,18 +143,21 @@ def run(disable_gripper: bool = False):
     if not disable_gripper:
         robot_mg.close_gripper(wait=True) or sys.exit(1)
 
-    # print("Press any key to go to corrected ingredient position:")
-    # input()
+    print("Press any key to go to corrected ingredient position:")
+    input()
 
     ############################################################################
     # pick container and go to actual ingredient position
-
     robot_mg.go_to_pose_goal(
-        make_pose([
-            INGREDIENT_POSITION[ingredient_id][0],
-            INGREDIENT_POSITION[ingredient_id][1] - 0.20,
-            INGREDIENT_POSITION[ingredient_id][2] + 0.05
-        ], INGREDIENT_POSITION[ingredient_id][3:]), cartesian_path=True
+        make_pose(
+            [
+                INGREDIENT_POSITION[target_ingredient_id][0],
+                INGREDIENT_POSITION[target_ingredient_id][1] - 0.20,
+                INGREDIENT_POSITION[target_ingredient_id][2] + 0.05,
+            ],
+            INGREDIENT_POSITION[target_ingredient_id][3:],
+        ),
+        cartesian_path=True,
     ) or sys.exit(1)
 
     # print("Moved to corrected ingredient position")
@@ -167,44 +179,42 @@ def run(disable_gripper: bool = False):
     robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT) or sys.exit(1)
 
     ############################################################################
-    # go to dispense position
+    # Dispense quantity
 
-    robot_mg.go_to_pose_goal(
-        make_pose(DISPENSE_POSITION[:3], DISPENSE_POSITION[3:]), cartesian_path=True
-    ) or sys.exit(1)
+    with open(
+        f"/home/nevin/source/ratatouille/ros-ws2/src/dispense/config/ingredient_params/{INGREDIENT_NAMES[target_ingredient_id]}.yaml",
+        "r",
+    ) as f:
+        DISPENSING_PARAMS = yaml.safe_load(f)
+
+    pos, orient = POURING_POSES[DISPENSING_PARAMS["container"]][DISPENSING_PARAMS["pouring_position"]]
+    pre_dispense_pose = make_pose(pos, orient)
+    assert robot_mg.go_to_pose_goal(
+        pre_dispense_pose,
+        cartesian_path=True,
+        orient_tolerance=0.05,
+        velocity_scaling=0.15,
+    )
 
     ############################################################################
-    # dispense - container tilt
-
-    robot_mg.go_to_joint_state(
-        offset_joint(robot_mg.get_current_joints(), [0, 0, 0, 0, 0, 3 * np.pi / 4])
-    ) or sys.exit(1)
-
-    ############################################################################
-    # container tilt upright
-
-    robot_mg.go_to_joint_state(
-        offset_joint(robot_mg.get_current_joints(), [0, 0, 0, 0, 0, -3 * np.pi / 4])
-    ) or sys.exit(1)
+    # Go to dispense position and dispense ingredient
+    dispenser = Dispenser(robot_mg)
+    dispenser.dispense_ingredient(DISPENSING_PARAMS, float(target_quantity))
 
     ############################################################################
     # go to pre-dispense position
-
     robot_mg.go_to_joint_state(PRE_DISPENSE_POSITION_JOINT) or sys.exit(1)
 
     ############################################################################
     # go to home position
-
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
-
 
     ############################################################################
     # go to ingredient view position
-
     robot_mg.go_to_pose_goal(
         make_pose(
-            INGREDIENT_POSITION[ingredient_id][:3],
-            INGREDIENT_POSITION[ingredient_id][3:],
+            INGREDIENT_POSITION[target_ingredient_id][:3],
+            INGREDIENT_POSITION[target_ingredient_id][3:],
         ),
         cartesian_path=True,
         acc_scaling=0.1,
@@ -215,7 +225,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go up a little (to prevent container hitting the shelf)
-
     robot_mg.go_to_pose_goal(
         offset_pose(robot_mg.get_current_pose(), [0, 0, 0.075]),
         cartesian_path=True,
@@ -227,7 +236,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go to ingredient position
-
     robot_mg.go_to_pose_goal(
         offset_pose(robot_mg.get_current_pose(), [0, -0.2, -0.05]),
         cartesian_path=True,
@@ -244,7 +252,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go back from container
-
     robot_mg.go_to_pose_goal(
         offset_pose(robot_mg.get_current_pose(), [0, 0.20, 0.05]),
         cartesian_path=True,
@@ -253,7 +260,6 @@ def run(disable_gripper: bool = False):
 
     ############################################################################
     # go to home position
-
     robot_mg.go_to_joint_state(HOME_POSITION_JOINT) or sys.exit(1)
 
     print("DONE")
