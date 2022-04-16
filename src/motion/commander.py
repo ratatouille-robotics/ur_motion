@@ -3,9 +3,9 @@ from __future__ import print_function
 
 import sys
 import math
-from typing import List, Union
 import numpy as np
 import time
+from typing import List, Union
 
 import rospy
 import actionlib
@@ -46,8 +46,8 @@ from enum import Enum, IntEnum
 
 
 class Controllers(str, Enum):
-    MOVEIT = "scaled_pos_joint_traj_controller"
-    POSE = "pose_based_cartesian_traj_controller"
+    SCALED_POS_JOINT_TRAJ = "scaled_pos_joint_traj_controller"
+    POSE_CARTESIAN_TRAJ = "pose_based_cartesian_traj_controller"
     TWIST = "twist_controller"
     JOINT_STATE = "joint_state_controller"
     FORCE = "force_torque_sensor_controller"
@@ -66,8 +66,8 @@ class GripperMotionStates(IntEnum):
 
 
 _available_controllers = [
-    Controllers.MOVEIT,
-    Controllers.POSE,
+    Controllers.SCALED_POS_JOINT_TRAJ,
+    Controllers.POSE_CARTESIAN_TRAJ,
     Controllers.TWIST,
 ]
 
@@ -217,7 +217,6 @@ class RobotMoveGroup(object):
             sys.exit(-1)
 
         for controller in _available_controllers:
-            print(f"Controller : {controller.name}")
             if controller not in loaded_controllers:
                 srv = LoadControllerRequest()
                 srv.name = controller
@@ -270,7 +269,7 @@ class RobotMoveGroup(object):
                     f"Error when starting {target_controller} and stopping {stop_controllers}"
                 )
 
-        if target_controller == Controllers.POSE:
+        if target_controller == Controllers.POSE_CARTESIAN_TRAJ:
             self.trajectory_client = actionlib.SimpleActionClient(
                 "{}/follow_cartesian_trajectory".format(target_controller),
                 FollowCartesianTrajectoryAction,
@@ -314,7 +313,7 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(Controllers.MOVEIT)
+        self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
@@ -371,7 +370,7 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(Controllers.MOVEIT)
+        self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
         # Check if MoveIt planner is running
         rospy.wait_for_service("/plan_kinematic_path", self.timeout)
         # Create a motion planning request with all necessary goals and constraints
@@ -414,7 +413,7 @@ class RobotMoveGroup(object):
         """
         Sends a cartesian position trajectory to the robot
         """
-        self.switch_controller(Controllers.POSE)
+        self.switch_controller(Controllers.POSE_CARTESIAN_TRAJ)
 
         goal = FollowCartesianTrajectoryGoal()
 
