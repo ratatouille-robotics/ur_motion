@@ -107,7 +107,7 @@ def _poses_close(
     d = math.dist((x1, y1, z1), (x0, y0, z0))
     # angle between orientations
     cos_phi_half = math.fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
-    phi = 2 * np.arccos(cos_phi_half)
+    phi = 2 * np.arccos(np.clip(cos_phi_half, -1, 1))
     result = True
     if d > pos_tolerance:
         rospy.logwarn(
