@@ -54,7 +54,7 @@ class Controllers(str, Enum):
 
 
 class GripperStates(IntEnum):
-    OPEN = 0
+    OPEN = 102
     CLOSE = 255
 
 
