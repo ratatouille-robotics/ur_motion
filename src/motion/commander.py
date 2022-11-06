@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+Team-B Ratatouille Robotics
+Team Members: Harshit Agarwal, Sai Shruthi Balaji,
+              Abhishek Pavani, Mohith Sakthivel, Nevin Valsaraj
+Rev2.3: March 6, 2022
+Description: Wrappers for all UR5e motion control modes
+
+"""
+
 from __future__ import print_function
 
 import sys
@@ -150,7 +159,8 @@ class RobotMoveGroup(object):
         # set a default timeout threshold non-motion requests
         self.timeout = rospy.Duration(5)
 
-        self.gripper_pub = rospy.Publisher("/move_gripper", gripperMsg, queue_size=10)
+        self.gripper_pub = rospy.Publisher(
+            "/move_gripper", gripperMsg, queue_size=10)
         rospy.Subscriber(
             "/Robotiq2FGripperRobotInput", gripperStateMsg, self.update_gripper_state
         )
@@ -167,7 +177,8 @@ class RobotMoveGroup(object):
             "controller_manager/list_controllers", ListControllers
         )
         # setup moveit publishers, services, and actions
-        self.get_plan = rospy.ServiceProxy("/plan_kinematic_path", GetMotionPlan)
+        self.get_plan = rospy.ServiceProxy(
+            "/plan_kinematic_path", GetMotionPlan)
         self.execute_plan = actionlib.SimpleActionClient(
             "/execute_trajectory", mi_msg.ExecuteTrajectoryAction
         )
@@ -175,21 +186,21 @@ class RobotMoveGroup(object):
         self._load_controllers()
         self._active_controller = None
 
-        ## Instantiate a `RobotCommander`_ object. Provides information such as the robot's
-        ## kinematic model and the robot's current joint states
+        # Instantiate a `RobotCommander`_ object. Provides information such as the robot's
+        # kinematic model and the robot's current joint states
         self.robot = moveit_commander.RobotCommander()
 
-        ## Instantiate a `PlanningSceneInterface`_ object.  This provides a remote interface
-        ## for maintaining the robot's internal understanding of the environment
+        # Instantiate a `PlanningSceneInterface`_ object.  This provides a remote interface
+        # for maintaining the robot's internal understanding of the environment
         self.scene = moveit_commander.PlanningSceneInterface()
 
-        ## Instantiate a `MoveGroupCommander`_ object.  This object is an interface to a
-        ## planning group (group of joints). This interface is used to plan and execute motions
+        # Instantiate a `MoveGroupCommander`_ object.  This object is an interface to a
+        # planning group (group of joints). This interface is used to plan and execute motions
         self.group_name = "manipulator"
         self.move_group = moveit_commander.MoveGroupCommander(self.group_name)
 
-        ## Create a `DisplayTrajectory`_ ROS publisher which is used to display
-        ## trajectories in Rviz:
+        # Create a `DisplayTrajectory`_ ROS publisher which is used to display
+        # trajectories in Rviz:
         self.display_trajectory_publisher = rospy.Publisher(
             "/move_group/display_planned_path", mi_msg.DisplayTrajectory, queue_size=20
         )
@@ -214,12 +225,14 @@ class RobotMoveGroup(object):
     def _load_controllers(self):
         srv = ListControllersRequest()
         resp = self.list_srv(srv)
-        loaded_controllers = [controller.name for controller in resp.controller]
+        loaded_controllers = [
+            controller.name for controller in resp.controller]
 
         try:
             self.load_srv.wait_for_service(self.timeout.to_sec())
         except rospy.exceptions.ROSException as err:
-            rospy.logerr("Could not reach Load Controller service. Msg: {}".format(err))
+            rospy.logerr(
+                "Could not reach Load Controller service. Msg: {}".format(err))
             sys.exit(-1)
 
         for controller in _available_controllers:
@@ -260,7 +273,8 @@ class RobotMoveGroup(object):
                 self.switch_srv.wait_for_service(self.timeout.to_sec())
             except rospy.exceptions.ROSException as err:
                 rospy.logerr(
-                    "Could not reach Switch Controller service. Msg: {}".format(err)
+                    "Could not reach Switch Controller service. Msg: {}".format(
+                        err)
                 )
                 sys.exit(-1)
 
@@ -399,7 +413,8 @@ class RobotMoveGroup(object):
 
         mp_res = self.get_plan(mp_req).motion_plan_response
         if mp_res.error_code.val != mp_res.error_code.SUCCESS:
-            rospy.logerr("Planner failed to generate a valid plan to the goal pose")
+            rospy.logerr(
+                "Planner failed to generate a valid plan to the goal pose")
             return False
         goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
         self.execute_plan.wait_for_server()
@@ -433,7 +448,8 @@ class RobotMoveGroup(object):
         if wait:
             self.trajectory_client.wait_for_result()
             result = self.trajectory_client.get_result()
-            rospy.loginfo(f"Trajectory execution finished in state {result.error_code}")
+            rospy.loginfo(
+                f"Trajectory execution finished in state {result.error_code}")
 
     def send_cartesian_vel_trajectory(self, twist: Twist):
         """
