@@ -6,6 +6,7 @@ import math
 import numpy as np
 import time
 from typing import List, Union
+import pyquaternion as pyq
 
 import rospy
 import actionlib
@@ -106,8 +107,13 @@ def _poses_close(
     # Euclidean distance
     d = math.dist((x1, y1, z1), (x0, y0, z0))
     # angle between orientations
-    cos_phi_half = math.fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
-    phi = 2 * np.arccos(np.clip(cos_phi_half, -1, 1))
+    quat_1 = pyq.Quaternion(qx0, qy0, qz0, qw0)
+    quat_2 = pyq.Quaternion(qx1, qy1, qz1, qw1)
+    phi = 2 * min(
+        pyq.Quaternion.distance(quat_1, quat_2),
+        pyq.Quaternion.distance(quat_1, -quat_2)
+    )
+
     result = True
     if d > pos_tolerance:
         rospy.logwarn(
