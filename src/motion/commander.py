@@ -468,7 +468,7 @@ class RobotMoveGroup(object):
         """
         Moves gripper to given state.
         """
-        assert GripperStates.OPEN <= target_state <= GripperStates.CLOSE
+        # assert GripperStates.OPEN <= target_state <= GripperStates.CLOSE
         if self._verbose:
             print(f"Moving gripper to state {target_state}")
         gripper_message = gripperMsg()
