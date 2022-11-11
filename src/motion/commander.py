@@ -22,7 +22,7 @@ import actionlib
 import moveit_commander
 import std_msgs.msg
 import moveit_msgs.msg as mi_msg
-
+import copy
 from geometry_msgs.msg import Pose, PoseStamped, Twist
 
 from cartesian_control_msgs.msg import (
@@ -333,49 +333,9 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
-        # Check if MoveIt planner is running
-        rospy.wait_for_service("/plan_kinematic_path", self.timeout)
-        # Create a motion planning request with all necessary goals and constraints
-        mp_req = mi_msg.MotionPlanRequest()
-        mp_req.pipeline_id = "pilz_industrial_motion_planner"
-        mp_req.planner_id = "LIN" if cartesian_path else "PTP"
-        mp_req.group_name = "manipulator"
-        mp_req.num_planning_attempts = 1
-
-        constraints = mi_msg.Constraints()
-        for joint_no in range(len(self.JOINTS)):
-            constraints.joint_constraints.append(mi_msg.JointConstraint())
-            constraints.joint_constraints[-1].joint_name = self.JOINTS[joint_no]
-            constraints.joint_constraints[-1].position = joint_goal[joint_no]
-            constraints.joint_constraints[-1].tolerance_above = tolerance
-            constraints.joint_constraints[-1].tolerance_below = tolerance
-
-        mp_req.goal_constraints.append(constraints)
-        mp_req.max_velocity_scaling_factor = velocity_scaling
-        mp_req.max_acceleration_scaling_factor = acc_scaling
-
-        mp_res = self.get_plan(mp_req).motion_plan_response
-        if mp_res.error_code.val != mp_res.error_code.SUCCESS:
-            rospy.logerr(
-                "Planner failed to generate a valid plan to the goal joint_state"
-            )
-            return False
-        if (
-            len(mp_res.trajectory.joint_trajectory.points) > 1
-            and mp_res.trajectory.joint_trajectory.points[-1].time_from_start
-            == mp_res.trajectory.joint_trajectory.points[-2].time_from_start
-        ):
-            mp_res.trajectory.joint_trajectory.points.pop(-2)
-            rospy.logwarn(
-                "Duplicate time stamp in the planned trajectory. Second last way-point was removed."
-            )
-        goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
-        self.execute_plan.wait_for_server()
-        self.execute_plan.send_goal(goal)
-        if wait:
-            self.execute_plan.wait_for_result()
-            # Calling ``stop()`` ensures that there is no residual movement
+        self.move_group.go(joint_goal, wait=wait)
+        # Calling ``stop()`` ensures that there is no residual movement
+        if not wait:
             self.move_group.stop()
             return _joints_close(joint_goal, self.get_current_joints(), tolerance)
         return True
@@ -390,43 +350,145 @@ class RobotMoveGroup(object):
         acc_scaling: float = 0.2,
         wait: bool = True,
     ) -> bool:
-        self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
-        # Check if MoveIt planner is running
-        rospy.wait_for_service("/plan_kinematic_path", self.timeout)
-        # Create a motion planning request with all necessary goals and constraints
-        mp_req = mi_msg.MotionPlanRequest()
-        mp_req.pipeline_id = "pilz_industrial_motion_planner"
-        mp_req.planner_id = "LIN" if cartesian_path else "PTP"
-        mp_req.group_name = "manipulator"
-        mp_req.num_planning_attempts = 1
-
-        mp_req_pose_goal = PoseStamped(
-            header=std_msgs.msg.Header(frame_id=self.planning_frame), pose=pose_goal
+        if(cartesian_path):
+            waypoints = []
+            wpose = self.move_group.get_current_pose().pose
+            waypoints.append(copy.deepcopy(wpose))
+            waypoints.append(copy.deepcopy(pose_goal))
+            (plan, fraction) = self.move_group.compute_cartesian_path(
+            waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
         )
+            # if(fraction < 0.99):
+            #     return False
+            self.move_group.execute(plan, wait=wait)
+            if not wait:
+                self.move_group.stop()
+                self.move_group.clear_pose_targets()
+                return _poses_close(
+                    pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
+                )
+            return True
+        else:
+            self.move_group.set_pose_target(pose_goal)
 
-        constraints = constructGoalConstraints(
-            self.eef_frame, mp_req_pose_goal, pos_tolerance, orient_tolerance
-        )
-        mp_req.goal_constraints.append(constraints)
-        mp_req.max_velocity_scaling_factor = velocity_scaling
-        mp_req.max_acceleration_scaling_factor = acc_scaling
+            ## Now, we call the planner to compute the plan and execute it.
+            # `go()` returns a boolean indicating whether the planning and execution was successful.
+            success = self.move_group.go(wait=wait)
+            # Calling `stop()` ensures that there is no residual movement
+            if not wait:
+                self.move_group.stop()
+                # It is always good to clear your targets after planning with poses.
+                # Note: there is no equivalent function for clear_joint_value_targets().
+                self.move_group.clear_pose_targets()
+                return _poses_close(
+                    pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
+                )
+            return True
 
-        mp_res = self.get_plan(mp_req).motion_plan_response
-        if mp_res.error_code.val != mp_res.error_code.SUCCESS:
-            rospy.logerr(
-                "Planner failed to generate a valid plan to the goal pose")
-            return False
-        goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
-        self.execute_plan.wait_for_server()
-        self.execute_plan.send_goal(goal)
-        if wait:
-            self.execute_plan.wait_for_result()
-            # Calling ``stop()`` ensures that there is no residual movement
-            self.move_group.stop()
-            return _poses_close(
-                pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
-            )
-        return True
+
+    # def go_to_joint_state(
+    #     self,
+    #     joint_goal: List[float],
+    #     cartesian_path: bool = False,
+    #     tolerance: float = 0.001,
+    #     velocity_scaling: float = 0.2,
+    #     acc_scaling: float = 0.2,
+    #     wait: bool = True,
+    # ) -> bool:
+    #     self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
+    #     # Check if MoveIt planner is running
+    #     rospy.wait_for_service("/plan_kinematic_path", self.timeout)
+    #     # Create a motion planning request with all necessary goals and constraints
+    #     mp_req = mi_msg.MotionPlanRequest()
+    #     mp_req.pipeline_id = "pilz_industrial_motion_planner"
+    #     mp_req.planner_id = "LIN" if cartesian_path else "PTP"
+    #     mp_req.group_name = "manipulator"
+    #     mp_req.num_planning_attempts = 1
+
+    #     constraints = mi_msg.Constraints()
+    #     for joint_no in range(len(self.JOINTS)):
+    #         constraints.joint_constraints.append(mi_msg.JointConstraint())
+    #         constraints.joint_constraints[-1].joint_name = self.JOINTS[joint_no]
+    #         constraints.joint_constraints[-1].position = joint_goal[joint_no]
+    #         constraints.joint_constraints[-1].tolerance_above = tolerance
+    #         constraints.joint_constraints[-1].tolerance_below = tolerance
+
+    #     mp_req.goal_constraints.append(constraints)
+    #     mp_req.max_velocity_scaling_factor = velocity_scaling
+    #     mp_req.max_acceleration_scaling_factor = acc_scaling
+
+    #     mp_res = self.get_plan(mp_req).motion_plan_response
+    #     if mp_res.error_code.val != mp_res.error_code.SUCCESS:
+    #         rospy.logerr(
+    #             "Planner failed to generate a valid plan to the goal joint_state"
+    #         )
+    #         return False
+    #     if (
+    #         len(mp_res.trajectory.joint_trajectory.points) > 1
+    #         and mp_res.trajectory.joint_trajectory.points[-1].time_from_start
+    #         == mp_res.trajectory.joint_trajectory.points[-2].time_from_start
+    #     ):
+    #         mp_res.trajectory.joint_trajectory.points.pop(-2)
+    #         rospy.logwarn(
+    #             "Duplicate time stamp in the planned trajectory. Second last way-point was removed."
+    #         )
+    #     goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
+    #     self.execute_plan.wait_for_server()
+    #     self.execute_plan.send_goal(goal)
+    #     if wait:
+    #         self.execute_plan.wait_for_result()
+    #         # Calling ``stop()`` ensures that there is no residual movement
+    #         self.move_group.stop()
+    #         return _joints_close(joint_goal, self.get_current_joints(), tolerance)
+    #     return True
+
+    # def go_to_pose_goal(
+    #     self,
+    #     pose_goal: Pose,
+    #     cartesian_path=True,
+    #     pos_tolerance: float = 0.001,
+    #     orient_tolerance: float = 0.01,
+    #     velocity_scaling: float = 0.2,
+    #     acc_scaling: float = 0.2,
+    #     wait: bool = True,
+    # ) -> bool:
+    #     self.switch_controller(Controllers.SCALED_POS_JOINT_TRAJ)
+    #     # Check if MoveIt planner is running
+    #     rospy.wait_for_service("/plan_kinematic_path", self.timeout)
+    #     # Create a motion planning request with all necessary goals and constraints
+    #     mp_req = mi_msg.MotionPlanRequest()
+    #     mp_req.pipeline_id = "pilz_industrial_motion_planner"
+    #     mp_req.planner_id = "LIN" if cartesian_path else "PTP"
+    #     mp_req.group_name = "manipulator"
+    #     mp_req.num_planning_attempts = 1
+
+    #     mp_req_pose_goal = PoseStamped(
+    #         header=std_msgs.msg.Header(frame_id=self.planning_frame), pose=pose_goal
+    #     )
+
+    #     constraints = constructGoalConstraints(
+    #         self.eef_frame, mp_req_pose_goal, pos_tolerance, orient_tolerance
+    #     )
+    #     mp_req.goal_constraints.append(constraints)
+    #     mp_req.max_velocity_scaling_factor = velocity_scaling
+    #     mp_req.max_acceleration_scaling_factor = acc_scaling
+
+    #     mp_res = self.get_plan(mp_req).motion_plan_response
+    #     if mp_res.error_code.val != mp_res.error_code.SUCCESS:
+    #         rospy.logerr(
+    #             "Planner failed to generate a valid plan to the goal pose")
+    #         return False
+    #     goal = mi_msg.ExecuteTrajectoryGoal(trajectory=mp_res.trajectory)
+    #     self.execute_plan.wait_for_server()
+    #     self.execute_plan.send_goal(goal)
+    #     if wait:
+    #         self.execute_plan.wait_for_result()
+    #         # Calling ``stop()`` ensures that there is no residual movement
+    #         self.move_group.stop()
+    #         return _poses_close(
+    #             pose_goal, self.get_current_pose(), pos_tolerance, orient_tolerance
+    #         )
+    #     return True
 
     def send_cartesian_pos_trajectory(
         self, pose_list: List[Pose], t_durations: List[float], wait: bool = False
