@@ -14,6 +14,7 @@ def offset_pose(pose: Pose, trans_offset: List = None, rot_offset: List = None) 
         raise NotImplementedError
     return pose
 
+
 def offset_pose_relative(poseA: Pose, poseB: Pose, cartesianOnly: bool = True) -> Pose:
     pose = Pose()
     pose.position.x = poseA.position.x - poseB.position.x
@@ -22,6 +23,7 @@ def offset_pose_relative(poseA: Pose, poseB: Pose, cartesianOnly: bool = True) -
     if not cartesianOnly:
         return NotImplementedError
     return pose
+
 
 def offset_joint(joint_state: List, joint_offset: List) -> List:
     assert len(joint_state) == len(

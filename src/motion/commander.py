@@ -448,17 +448,23 @@ class RobotMoveGroup(object):
         """
         self.gripper_motion_state = data.gOBJ
 
-    def go_to_gripper_state(self, target_state: int, wait=False, minWait=1.5) -> bool:
+    def go_to_gripper_state(
+        self,
+        target_state: int,
+        wait: bool = False,
+        minWait: float = 1.5,
+        speed: int = 100,
+        force: int = 100
+    ) -> bool:
         """
         Moves gripper to given state.
         """
-        assert GripperStates.OPEN <= target_state <= GripperStates.CLOSE
         if self._verbose:
             print(f"Moving gripper to state {target_state}")
         gripper_message = gripperMsg()
         gripper_message.pos = target_state
-        gripper_message.speed = 100
-        gripper_message.force = 100
+        gripper_message.speed = speed
+        gripper_message.force = force
         self.gripper_pub.publish(gripper_message)
         start = time.time()
         if wait:
@@ -470,18 +476,40 @@ class RobotMoveGroup(object):
                     return False
         return True
 
-    def open_gripper(self, wait=False) -> bool:
+    def open_gripper(
+        self,
+        target_state=GripperStates.OPEN,
+        wait=False,
+        speed=100,
+        force=100
+    ) -> bool:
         """
         Opens gripper.
         """
         if self._verbose:
             print("Opening gripper")
-        return self.go_to_gripper_state(GripperStates.OPEN, wait)
+        return self.go_to_gripper_state(
+            target_state=target_state,
+            wait=wait,
+            speed=speed,
+            force=force
+        )
 
-    def close_gripper(self, wait=False) -> bool:
+    def close_gripper(
+        self,
+        target_state=GripperStates.CLOSE,
+        wait=False,
+        speed=100,
+        force=100
+    ) -> bool:
         """
         Closes gripper.
         """
         if self._verbose:
             print("Closing gripper")
-        return self.go_to_gripper_state(GripperStates.CLOSE, wait)
+        return self.go_to_gripper_state(
+            target_state=target_state,
+            wait=wait,
+            speed=speed,
+            force=force
+        )
